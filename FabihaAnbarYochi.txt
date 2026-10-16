@@ -1,0 +1,601 @@
+--
+--
+-- Fabiha Anbar
+--
+-- The Yo-Chi Bowl Planner Database
+--
+-- Yo-Chi is a self-serve frozen yogurt store in Australia. Customers fill
+-- a cup with as many frozen yogurt flavours and toppings as they like, and
+-- pay for the bowl by weight at the register. Yo-Chi publishes the calories
+-- and sugar of each flavour and topping per 100 grams, but it does not tell
+-- a customer the total calories, sugar or cost of the bowl they actually
+-- make, because every bowl is different.
+--
+-- This database records Yo-Chi's frozen yogurt flavours and toppings, with
+-- the calories, sugar and price of each per 100 grams. Toppings are grouped
+-- into categories such as fresh fruit, sweet treats, crunch, and sauces.
+-- Customers can save the bowls they make, recording how many grams of each
+-- flavour and topping went into each bowl. From this, the database works
+-- out each bowl's total calories, sugar and cost, and shows whether the
+-- bowl fits within the customer's own calorie limit and budget for a bowl.
+--
+-- Website that inspired this project:  https://yochi.com.au
+--
+-- Nutritional data was taken from Yo-Chi's nutritional information sheet:
+--   https://yochi.com.au/wp-content/uploads/2026/03/Nutritional-Information.pdf
+--
+-- Notes on the data:
+--   Yo-Chi lists energy in kilojoules. Calories (kcal) in this database
+--   were calculated as kilojoules / 4.184, rounded to a whole number.
+--   Yo-Chi charges for the whole bowl by weight, so the prices per 100 grams
+--   of each flavour and topping are illustrative values.
+--   The customers and their bowls are imaginary.
+--
+
+
+DROP view  IF EXISTS Bowl_Summary  CASCADE;
+
+DROP table IF EXISTS Bowl_Topping  CASCADE;
+DROP table IF EXISTS Bowl_Flavour  CASCADE;
+DROP table IF EXISTS Bowl          CASCADE;
+DROP table IF EXISTS Topping       CASCADE;
+DROP table IF EXISTS Flavour       CASCADE;
+DROP table IF EXISTS Category      CASCADE;
+DROP table IF EXISTS Customer      CASCADE;
+
+
+
+--
+-- Table creation
+--
+
+
+
+Create table Customer
+(
+  customer_id     INTEGER,            -- Unique number for each customer
+  name            TEXT     NOT NULL,  -- Customer's name
+  calorie_limit   INTEGER  NOT NULL,  -- Most calories (kcal) wanted in one bowl
+  budget          NUMERIC(5,2) NOT NULL, -- Most money ($AUD) to spend on one bowl
+
+  CONSTRAINT CustomerPK PRIMARY KEY (customer_id),
+
+  CONSTRAINT di_table_Customer_customer_id CHECK (customer_id > 0),
+
+  CONSTRAINT di_table_Customer_calorie_limit CHECK
+             ((calorie_limit >= 100) AND (calorie_limit <= 2000)),
+
+  CONSTRAINT di_table_Customer_budget CHECK
+             ((budget > 0) AND (budget <= 100))
+);
+
+
+Create table Category
+(
+  category_id     INTEGER,            -- Unique number for each topping category
+  category_name   TEXT     NOT NULL,  -- e.g. Fresh Fruit, Sweet Treats
+
+  CONSTRAINT CategoryPK PRIMARY KEY (category_id),
+
+  CONSTRAINT di_table_Category_category_id CHECK (category_id > 0),
+
+  CONSTRAINT di_table_Category_category_name CHECK (category_name IN (
+                'Fresh Fruit',
+                'Sweet Treats',
+                'Crunch',
+                'Sauces & Spreads',
+                'Seasonal Specials'))
+);
+
+
+Create table Flavour
+(
+  flavour_id      INTEGER,            -- Unique number for each yogurt flavour
+  name            TEXT     NOT NULL,  -- Name of the flavour
+  calories        INTEGER  NOT NULL,  -- kcal per 100g
+  sugar           NUMERIC(4,1) NOT NULL, -- Grams of sugar per 100g
+  price           NUMERIC(5,2) NOT NULL, -- $AUD per 100g
+
+  CONSTRAINT FlavourPK PRIMARY KEY (flavour_id),
+
+  CONSTRAINT di_table_Flavour_flavour_id CHECK (flavour_id > 0),
+
+  -- Pure fat is about 900 kcal per 100g, so no food can be higher than this
+  CONSTRAINT di_table_Flavour_calories CHECK
+             ((calories >= 0) AND (calories <= 900)),
+
+  -- 100 grams of food cannot contain more than 100 grams of sugar
+  CONSTRAINT di_table_Flavour_sugar CHECK
+             ((sugar >= 0) AND (sugar <= 100)),
+
+  -- Each gram of sugar gives about 4 kcal, so calories must be at least
+  -- 4 times the sugar
+  CONSTRAINT di_table_Flavour_calories_sugar CHECK (calories >= sugar * 4),
+
+  CONSTRAINT di_table_Flavour_price CHECK
+             ((price > 0) AND (price <= 20))
+);
+
+
+Create table Topping
+(
+  topping_id      INTEGER,            -- Unique number for each topping
+  name            TEXT     NOT NULL,  -- Name of the topping
+  calories        INTEGER  NOT NULL,  -- kcal per 100g
+  sugar           NUMERIC(4,1) NOT NULL, -- Grams of sugar per 100g
+  price           NUMERIC(5,2) NOT NULL, -- $AUD per 100g
+  category_id     INTEGER  NOT NULL,  -- The category this topping belongs to
+
+  CONSTRAINT ToppingPK PRIMARY KEY (topping_id),
+
+  CONSTRAINT ToppingFK_Category FOREIGN KEY (category_id)
+                                REFERENCES Category
+  ON DELETE RESTRICT
+  ON UPDATE CASCADE,
+
+  CONSTRAINT di_table_Topping_topping_id CHECK (topping_id > 0),
+
+  CONSTRAINT di_table_Topping_calories CHECK
+             ((calories >= 0) AND (calories <= 900)),
+
+  CONSTRAINT di_table_Topping_sugar CHECK
+             ((sugar >= 0) AND (sugar <= 100)),
+
+  CONSTRAINT di_table_Topping_calories_sugar CHECK (calories >= sugar * 4),
+
+  CONSTRAINT di_table_Topping_price CHECK
+             ((price > 0) AND (price <= 20))
+);
+
+
+Create table Bowl
+(
+  bowl_id         INTEGER,            -- Unique number for each saved bowl
+  bowl_date       DATE     NOT NULL,  -- The date the bowl was made
+  customer_id     INTEGER  NOT NULL,  -- The customer who saved the bowl
+
+  CONSTRAINT BowlPK PRIMARY KEY (bowl_id),
+
+  CONSTRAINT BowlFK_Customer FOREIGN KEY (customer_id)
+                             REFERENCES Customer
+  ON DELETE CASCADE
+  ON UPDATE CASCADE,
+
+  CONSTRAINT di_table_Bowl_bowl_id CHECK (bowl_id > 0),
+
+  -- A bowl must have a sensible date (no bowls recorded before 2016)
+  CONSTRAINT di_table_Bowl_bowl_date CHECK (bowl_date >= '2016-01-01')
+);
+
+
+Create table Bowl_Flavour
+(
+  bowl_id         INTEGER,            -- The bowl
+  flavour_id      INTEGER,            -- A flavour in that bowl
+  grams           INTEGER  NOT NULL,  -- Grams of this flavour in the bowl
+
+  CONSTRAINT Bowl_FlavourPK PRIMARY KEY (bowl_id, flavour_id),
+
+  CONSTRAINT Bowl_FlavourFK_Bowl FOREIGN KEY (bowl_id)
+                                 REFERENCES Bowl
+  ON DELETE CASCADE
+  ON UPDATE CASCADE,
+
+  CONSTRAINT Bowl_FlavourFK_Flavour FOREIGN KEY (flavour_id)
+                                    REFERENCES Flavour
+  ON DELETE RESTRICT
+  ON UPDATE CASCADE,
+
+  CONSTRAINT di_table_Bowl_Flavour_grams CHECK
+             ((grams > 0) AND (grams <= 1000))
+);
+
+
+Create table Bowl_Topping
+(
+  bowl_id         INTEGER,            -- The bowl
+  topping_id      INTEGER,            -- A topping on that bowl
+  grams           INTEGER  NOT NULL,  -- Grams of this topping on the bowl
+
+  CONSTRAINT Bowl_ToppingPK PRIMARY KEY (bowl_id, topping_id),
+
+  CONSTRAINT Bowl_ToppingFK_Bowl FOREIGN KEY (bowl_id)
+                                 REFERENCES Bowl
+  ON DELETE CASCADE
+  ON UPDATE CASCADE,
+
+  CONSTRAINT Bowl_ToppingFK_Topping FOREIGN KEY (topping_id)
+                                    REFERENCES Topping
+  ON DELETE RESTRICT
+  ON UPDATE CASCADE,
+
+  CONSTRAINT di_table_Bowl_Topping_grams CHECK
+             ((grams > 0) AND (grams <= 500))
+);
+
+
+
+--
+-- View creation
+--
+-- Bowl_Summary shows every saved bowl with its total weight, calories,
+-- sugar and cost, worked out from the grams of each flavour and topping in
+-- it, and whether the bowl is within the customer's calorie limit and budget.
+--
+-- The flavour totals and the topping totals are added up separately (in
+-- two sub-queries) and then added together. This stops a bowl with several
+-- flavours AND several toppings being counted twice. A LEFT JOIN is used
+-- for the toppings because a bowl does not have to have any toppings.
+-- 100.0 (not 100) is used so the division is not rounded to whole numbers.
+--
+
+
+
+CREATE VIEW Bowl_Summary AS
+    SELECT  b.bowl_id, c.name AS customer, b.bowl_date,
+            f.grams + COALESCE(t.grams, 0)                  AS total_grams,
+            ROUND(f.calories + COALESCE(t.calories, 0), 1)  AS total_calories,
+            ROUND(f.sugar    + COALESCE(t.sugar,    0), 1)  AS total_sugar,
+            ROUND(f.cost     + COALESCE(t.cost,     0), 2)  AS total_cost,
+            c.calorie_limit, c.budget,
+            CASE WHEN f.calories + COALESCE(t.calories, 0) <= c.calorie_limit
+                 THEN 'Yes' ELSE 'No' END                   AS within_calories,
+            CASE WHEN f.cost + COALESCE(t.cost, 0) <= c.budget
+                 THEN 'Yes' ELSE 'No' END                   AS within_budget
+    FROM    Bowl b
+            JOIN Customer c ON b.customer_id = c.customer_id
+            JOIN (SELECT   bowl_id,
+                           SUM(grams)                    AS grams,
+                           SUM(grams * calories / 100.0) AS calories,
+                           SUM(grams * sugar    / 100.0) AS sugar,
+                           SUM(grams * price    / 100.0) AS cost
+                  FROM     Bowl_Flavour NATURAL JOIN Flavour
+                  GROUP BY bowl_id) f  ON b.bowl_id = f.bowl_id
+            LEFT JOIN
+                 (SELECT   bowl_id,
+                           SUM(grams)                    AS grams,
+                           SUM(grams * calories / 100.0) AS calories,
+                           SUM(grams * sugar    / 100.0) AS sugar,
+                           SUM(grams * price    / 100.0) AS cost
+                  FROM     Bowl_Topping NATURAL JOIN Topping
+                  GROUP BY bowl_id) t  ON b.bowl_id = t.bowl_id;
+
+
+
+--
+-- Customer insertion
+--
+
+
+
+INSERT INTO Customer VALUES (1, 'Mia Chen',   450, 12.00);
+INSERT INTO Customer VALUES (2, 'Liam Patel', 650, 16.00);
+INSERT INTO Customer VALUES (3, 'Zara Ahmed', 350, 10.00);
+INSERT INTO Customer VALUES (4, 'Noah Kim',   500, 14.00);  -- no bowls saved yet
+
+
+
+--
+-- Category insertion
+--
+
+
+
+INSERT INTO Category VALUES (1, 'Fresh Fruit');
+INSERT INTO Category VALUES (2, 'Sweet Treats');
+INSERT INTO Category VALUES (3, 'Crunch');
+INSERT INTO Category VALUES (4, 'Sauces & Spreads');
+INSERT INTO Category VALUES (5, 'Seasonal Specials');  -- no toppings yet
+
+
+
+--
+-- Flavour insertion
+--               (flavour_id, name, calories, sugar, price -- all per 100g)
+--
+
+
+
+INSERT INTO Flavour VALUES (1, 'Vanilla',             123, 21.4, 3.90);
+INSERT INTO Flavour VALUES (2, 'Cookies & Cream',     131, 21.6, 4.10);
+INSERT INTO Flavour VALUES (3, 'Mango',               128, 24.3, 3.90);
+INSERT INTO Flavour VALUES (4, 'Matcha',              128, 22.5, 4.20);
+INSERT INTO Flavour VALUES (5, 'Signature Tart',      124, 20.9, 3.90);
+INSERT INTO Flavour VALUES (6, 'Ube',                 118, 20.7, 4.20);
+INSERT INTO Flavour VALUES (7, 'Salted Butterscotch', 130, 21.9, 4.10);
+INSERT INTO Flavour VALUES (8, 'Choccy (VF)',         162, 24.1, 4.30);
+
+
+
+--
+-- Topping insertion
+--   (topping_id, name, calories, sugar, price -- all per 100g, category_id)
+--
+
+
+
+INSERT INTO Topping VALUES ( 1, 'Strawberries',             33,  4.9, 4.50, 1);
+INSERT INTO Topping VALUES ( 2, 'Fresh Blueberries',        40, 10.0, 4.80, 1);
+INSERT INTO Topping VALUES ( 3, 'Fresh Mango',              60, 13.7, 4.60, 1);
+INSERT INTO Topping VALUES ( 4, 'Oreos',                   490, 38.0, 5.20, 2);
+INSERT INTO Topping VALUES ( 5, 'Mini Mochi',              351, 27.9, 5.50, 2);
+INSERT INTO Topping VALUES ( 6, 'Chocolate Fudge Brownie', 447, 38.2, 5.30, 2);
+INSERT INTO Topping VALUES ( 7, 'Crispy Oat Granola',      574,  9.3, 4.70, 3);
+INSERT INTO Topping VALUES ( 8, 'Almonds',                 570,  5.2, 5.00, 3);
+INSERT INTO Topping VALUES ( 9, 'Nutella (Warm)',          538, 56.3, 5.00, 4);
+INSERT INTO Topping VALUES (10, 'Raspberry Coulis',        105, 20.5, 4.60, 4);
+INSERT INTO Topping VALUES (11, 'Biscoff Spread',          584, 36.8, 5.20, 4); -- in no bowl yet
+
+
+
+--
+-- Bowl insertion
+--                      (bowl_id, bowl_date, customer_id)
+--
+
+
+
+INSERT INTO Bowl VALUES (101, '2026-09-05', 1);
+INSERT INTO Bowl VALUES (102, '2026-09-19', 1);
+INSERT INTO Bowl VALUES (103, '2026-10-03', 1);
+INSERT INTO Bowl VALUES (104, '2026-09-12', 2);
+INSERT INTO Bowl VALUES (105, '2026-10-01', 2);
+INSERT INTO Bowl VALUES (106, '2026-09-27', 3);   -- a bowl with no toppings
+
+
+
+--
+-- Bowl_Flavour insertion
+--                      (bowl_id, flavour_id, grams)
+--
+
+
+
+INSERT INTO Bowl_Flavour VALUES (101, 1, 150);
+INSERT INTO Bowl_Flavour VALUES (101, 5, 100);
+INSERT INTO Bowl_Flavour VALUES (102, 2, 200);
+INSERT INTO Bowl_Flavour VALUES (103, 3, 180);
+INSERT INTO Bowl_Flavour VALUES (104, 8, 200);
+INSERT INTO Bowl_Flavour VALUES (104, 7, 100);
+INSERT INTO Bowl_Flavour VALUES (105, 4, 150);
+INSERT INTO Bowl_Flavour VALUES (105, 6, 100);
+INSERT INTO Bowl_Flavour VALUES (106, 5, 220);
+
+
+
+--
+-- Bowl_Topping insertion
+--                      (bowl_id, topping_id, grams)
+--
+
+
+
+INSERT INTO Bowl_Topping VALUES (101,  1, 40);
+INSERT INTO Bowl_Topping VALUES (101,  2, 30);
+INSERT INTO Bowl_Topping VALUES (102,  4, 30);
+INSERT INTO Bowl_Topping VALUES (102,  6, 40);
+INSERT INTO Bowl_Topping VALUES (103,  3, 50);
+INSERT INTO Bowl_Topping VALUES (103, 10, 30);
+INSERT INTO Bowl_Topping VALUES (104,  9, 40);
+INSERT INTO Bowl_Topping VALUES (104,  8, 25);
+INSERT INTO Bowl_Topping VALUES (104,  5, 40);
+INSERT INTO Bowl_Topping VALUES (105,  5, 30);
+INSERT INTO Bowl_Topping VALUES (105,  7, 30);
+
+
+
+--
+-- Queries
+--
+-- Each query has an English description, the SQL, and the output it
+-- produced when run in PostgreSQL (shown as comments).
+--
+
+
+--
+-- Query 1: A simple query of a single table.
+--
+-- List the name, calories and sugar (per 100g) of all frozen yogurt flavours
+-- with fewer than 125 calories per 100g, from lowest to highest calories.
+--
+
+SELECT name, calories, sugar
+FROM Flavour
+WHERE calories < 125
+ORDER BY calories;
+
+-- yochi=> (output)
+--
+--       name      | calories | sugar 
+-- ----------------+----------+-------
+--  Ube            |      118 |  20.7
+--  Vanilla        |      123 |  21.4
+--  Signature Tart |      124 |  20.9
+-- (3 rows)
+
+
+--
+-- Query 2: A query which uses the words "natural join".
+--
+-- For bowl 104, list each topping's name, how many grams were used, and how
+-- many calories that topping added to the bowl (grams x calories / 100),
+-- from the most calories added to the least.
+--
+
+SELECT name, grams, ROUND(grams * calories / 100.0, 1) AS calories_added
+FROM Bowl_Topping NATURAL JOIN Topping
+WHERE bowl_id = 104
+ORDER BY calories_added DESC;
+
+-- yochi=> (output)
+--
+--       name      | grams | calories_added 
+-- ----------------+-------+----------------
+--  Nutella (Warm) |    40 |          215.2
+--  Almonds        |    25 |          142.5
+--  Mini Mochi     |    40 |          140.4
+-- (3 rows)
+
+
+--
+-- Query 3: The cross product equivalent to the "natural join" query above.
+--
+-- The same as Query 2, written using the cross product notation.
+--
+
+SELECT name, grams, ROUND(grams * calories / 100.0, 1) AS calories_added
+FROM Bowl_Topping, Topping
+WHERE Bowl_Topping.topping_id = Topping.topping_id
+AND bowl_id = 104
+ORDER BY calories_added DESC;
+
+-- yochi=> (output)
+--
+--       name      | grams | calories_added 
+-- ----------------+-------+----------------
+--  Nutella (Warm) |    40 |          215.2
+--  Almonds        |    25 |          142.5
+--  Mini Mochi     |    40 |          140.4
+-- (3 rows)
+
+
+--
+-- Query 4: A query involving a "GROUP BY" and a "HAVING".
+--
+-- For each topping category, show how many toppings it has and the average
+-- calories per 100g of its toppings. Only show categories whose toppings
+-- average more than 300 calories per 100g, highest average first.
+--
+
+SELECT category_name, COUNT(*) AS toppings, ROUND(AVG(calories), 1) AS avg_calories
+FROM Topping NATURAL JOIN Category
+GROUP BY category_name
+HAVING AVG(calories) > 300
+ORDER BY avg_calories DESC;
+
+-- yochi=> (output)
+--
+--   category_name   | toppings | avg_calories 
+-- ------------------+----------+--------------
+--  Crunch           |        2 |        572.0
+--  Sweet Treats     |        3 |        429.3
+--  Sauces & Spreads |        3 |        409.0
+-- (3 rows)
+
+
+--
+-- Query 5: A query which uses a sub-query.
+--
+-- List the name and sugar (per 100g) of every topping that has more sugar
+-- than the average topping, from most sugar to least.
+--
+
+SELECT name, sugar
+FROM Topping
+WHERE sugar > (SELECT AVG(sugar)
+               FROM Topping)
+ORDER BY sugar DESC;
+
+-- yochi=> (output)
+--
+--           name           | sugar 
+-- -------------------------+-------
+--  Nutella (Warm)          |  56.3
+--  Chocolate Fudge Brownie |  38.2
+--  Oreos                   |  38.0
+--  Biscoff Spread          |  36.8
+--  Mini Mochi              |  27.9
+-- (5 rows)
+
+
+--
+-- Query 6: A cross product which cannot be implemented using "natural join" (self join).
+--
+-- "Healthier swaps": for each topping, find another topping in the SAME
+-- category that has at least 400 fewer calories per 100g, and show how
+-- many calories per 100g the swap would save.
+--
+
+SELECT t1.name AS topping, t2.name AS healthier_swap,
+       t1.calories - t2.calories AS calories_saved
+FROM Topping t1, Topping t2
+WHERE t1.category_id = t2.category_id
+AND t1.calories - t2.calories >= 400
+ORDER BY t1.name;
+
+-- yochi=> (output)
+--
+--     topping     |  healthier_swap  | calories_saved 
+-- ----------------+------------------+----------------
+--  Biscoff Spread | Raspberry Coulis |            479
+--  Nutella (Warm) | Raspberry Coulis |            433
+-- (2 rows)
+
+
+--
+-- View query 1: Using the view Bowl_Summary.
+--
+-- Show every saved bowl with its total calories and total cost, and whether
+-- it is within the customer's calorie limit and budget.
+--
+
+SELECT bowl_id, customer, total_calories, total_cost, within_calories, within_budget
+FROM Bowl_Summary
+ORDER BY bowl_id;
+
+-- yochi=> (output)
+--
+--  bowl_id |  customer  | total_calories | total_cost | within_calories | within_budget 
+-- ---------+------------+----------------+------------+-----------------+---------------
+--      101 | Mia Chen   |          333.7 |      12.99 | Yes             | No
+--      102 | Mia Chen   |          587.8 |      11.88 | No              | Yes
+--      103 | Mia Chen   |          291.9 |      10.70 | Yes             | Yes
+--      104 | Liam Patel |          952.1 |      18.15 | No              | No
+--      105 | Liam Patel |          587.5 |      13.56 | Yes             | Yes
+--      106 | Zara Ahmed |          272.8 |       8.58 | Yes             | Yes
+-- (6 rows)
+
+
+--
+-- View query 2: Using the view Bowl_Summary (2).
+--
+-- List only the bowls that are within BOTH the customer's calorie limit and
+-- budget.
+--
+
+SELECT bowl_id, customer, total_calories, total_cost
+FROM Bowl_Summary
+WHERE within_calories = 'Yes' AND within_budget = 'Yes'
+ORDER BY bowl_id;
+
+-- yochi=> (output)
+--
+--  bowl_id |  customer  | total_calories | total_cost 
+-- ---------+------------+----------------+------------
+--      103 | Mia Chen   |          291.9 |      10.70
+--      105 | Liam Patel |          587.5 |      13.56
+--      106 | Zara Ahmed |          272.8 |       8.58
+-- (3 rows)
+
+
+
+--
+-- Demonstrating the ON DELETE actions (these are left as comments so that
+-- running this script does not change the data).
+--
+-- ON DELETE RESTRICT: Vanilla is used in bowl 101, so it cannot be deleted.
+--
+-- DELETE FROM Flavour WHERE flavour_id = 1;
+--
+-- ERROR:  update or delete on table "flavour" violates foreign key
+--         constraint "bowl_flavourfk_flavour" on table "bowl_flavour"
+--
+--
+-- ON DELETE CASCADE: deleting customer Mia Chen also deletes her 3 bowls,
+-- and the flavours and toppings recorded for those bowls.
+--
+-- DELETE FROM Customer WHERE customer_id = 1;
+--
+-- DELETE 1
+-- (Bowl now has 3 rows instead of 6, and Bowl_Flavour has 5 rows instead of 9)
+--
